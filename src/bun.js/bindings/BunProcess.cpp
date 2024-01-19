@@ -167,7 +167,7 @@ static JSValue constructVersions(VM& vm, JSObject* processObject)
     object->putDirect(vm, JSC::Identifier::fromString(vm, "usockets"_s),
         JSC::JSValue(JSC::jsString(vm, makeString(Bun__versions_usockets))), 0);
 
-    object->putDirect(vm, JSC::Identifier::fromString(vm, "v8"_s), JSValue(JSC::jsString(vm, makeString("11.3.244.8-node.15"_s))), 0);
+    object->putDirect(vm, JSC::Identifier::fromString(vm, "v8"_s), JSValue(JSC::jsString(vm, String("11.3.244.8-node.15"_s))), 0);
 #if OS(WINDOWS)
     object->putDirect(vm, JSC::Identifier::fromString(vm, "uv"_s), JSValue(JSC::jsString(vm, makeString(uv_version_string()))), 0);
 #else
@@ -218,19 +218,6 @@ static void dispatchExitInternal(JSC::JSGlobalObject* globalObject, Process* pro
     MarkedArgumentBuffer arguments;
     arguments.append(jsNumber(exitCode));
     emitter.emit(event, arguments);
-}
-
-JSC_DEFINE_CUSTOM_SETTER(Process_defaultSetter,
-    (JSC::JSGlobalObject * globalObject, JSC::EncodedJSValue thisValue,
-        JSC::EncodedJSValue value, JSC::PropertyName propertyName))
-{
-    JSC::VM& vm = globalObject->vm();
-
-    JSC::JSObject* thisObject = JSC::jsDynamicCast<JSC::JSObject*>(JSValue::decode(thisValue));
-    if (value)
-        thisObject->putDirect(vm, propertyName, JSValue::decode(value), 0);
-
-    return true;
 }
 
 extern "C" bool Bun__resolveEmbeddedNodeFile(void*, BunString*);
@@ -1784,17 +1771,57 @@ JSC_DEFINE_HOST_FUNCTION(Process_functionAssert, (JSGlobalObject * globalObject,
     return JSValue::encode(jsUndefined());
 }
 
-#define PROCESS_BINDING_NOT_IMPLEMENTED_ISSUE(str, issue)                                                                                                                                                                                \
-    {                                                                                                                                                                                                                                    \
-        throwScope.throwException(globalObject, createError(globalObject, String("process.binding(\"" str "\") is not implemented in Bun. Track the status & thumbs up the issue: https://github.com/oven-sh/bun/issues/" issue ""_s))); \
-        return JSValue::encode(JSValue {});                                                                                                                                                                                              \
+inline JSC::EncodedJSValue createProcessBindingNotImplementedProxy(
+    JSC::JSGlobalObject* globalObject,
+    JSC::VM& vm,
+    WTF::String handlerGetTrapCode)
+{
+    auto* nullProtoStruct = globalObject->nullPrototypeObjectStructure();
+    auto&& origin = SourceOrigin(WTF::URL());
+    auto* target = JSC::constructEmptyObject(vm, nullProtoStruct);
+    auto* handler = JSC::constructEmptyObject(vm, nullProtoStruct);
+    SourceCode handlerGetTrapSourceCode
+        = JSC::makeSource(
+            handlerGetTrapCode,
+            origin,
+            JSC::SourceTaintedOrigin::Untainted);
+    JSFunction* func
+        = JSFunction::create(
+            vm,
+            JSC::createBuiltinExecutable(
+                vm,
+                handlerGetTrapSourceCode,
+                Identifier(),
+                ImplementationVisibility::Private,
+                ConstructorKind::None,
+                ConstructAbility::CannotConstruct,
+                InlineAttribute::None)
+                ->link(vm, nullptr, handlerGetTrapSourceCode),
+            static_cast<JSC::JSGlobalObject*>(globalObject));
+    handler->putDirect(vm, Identifier::fromString(vm, "get"_s), func, 0);
+    return JSValue::encode(ProxyObject::create(globalObject, target, handler));
+}
+#define PROCESS_BINDING_NOT_IMPLEMENTED_1_ARGS(moduleName)                                                                                                                                            \
+    {                                                                                                                                                                                                 \
+        auto handlerGetTrapCode = String(                                                                                                                                                             \
+            "(function (_target,propertyKey){"                                                                                                                                                        \
+            "throw new Error(`process.binding(\"" moduleName "\").${propertyKey} is not implemented in Bun. If that breaks something, please file an issue and include a reproducible code sample.`)" \
+            "})"_s);                                                                                                                                                                                  \
+        return createProcessBindingNotImplementedProxy(globalObject, vm, handlerGetTrapCode);                                                                                                         \
     }
-
-#define PROCESS_BINDING_NOT_IMPLEMENTED(str)                                                                                                                                                                                            \
-    {                                                                                                                                                                                                                                   \
-        throwScope.throwException(globalObject, createError(globalObject, String("process.binding(\"" str "\") is not implemented in Bun. If that breaks something, please file an issue and include a reproducible code sample."_s))); \
-        return JSValue::encode(JSValue {});                                                                                                                                                                                             \
+#define PROCESS_BINDING_NOT_IMPLEMENTED_2_ARGS(moduleName, issue)                                                                                                                                                                          \
+    {                                                                                                                                                                                                                                      \
+        auto handlerGetTrapCode = String(                                                                                                                                                                                                  \
+            "(function (_target,propertyKey){"                                                                                                                                                                                             \
+            "throw new Error(`process.binding(\"" moduleName "\").${propertyKey} is not implemented in Bun. Track the status, thumbs up the issue, & report the binding property name: https://github.com/oven-sh/bun/issues/" issue ".`)" \
+            "})"_s);                                                                                                                                                                                                                       \
+        return createProcessBindingNotImplementedProxy(globalObject, vm, handlerGetTrapCode);                                                                                                                                              \
     }
+#define GET_3RD_ARG(arg1, arg2, arg3, ...) arg3
+#define PROCESS_BINDING_NOT_IMPLEMENTED_MACRO_CHOOSER(...)           \
+    GET_3RD_ARG(__VA_ARGS__, PROCESS_BINDING_NOT_IMPLEMENTED_2_ARGS, \
+        PROCESS_BINDING_NOT_IMPLEMENTED_1_ARGS)
+#define PROCESS_BINDING_NOT_IMPLEMENTED(...) PROCESS_BINDING_NOT_IMPLEMENTED_MACRO_CHOOSER(__VA_ARGS__)(__VA_ARGS__)
 
 inline JSValue processBindingUtil(Zig::GlobalObject* globalObject, JSC::VM& vm)
 {
@@ -1825,23 +1852,23 @@ inline JSValue processBindingConfig(Zig::GlobalObject* globalObject, JSC::VM& vm
     return config;
 }
 
-JSC_DEFINE_HOST_FUNCTION(Process_functionBinding, (JSGlobalObject * jsGlobalObject, CallFrame* callFrame))
+JSC_DEFINE_HOST_FUNCTION(Process_functionBinding, (JSGlobalObject * globalObject, CallFrame* callFrame))
 {
-    auto& vm = jsGlobalObject->vm();
+    auto lexicalGlobalObject = jsCast<Zig::GlobalObject*>(globalObject);
+    auto& vm = globalObject->vm();
     auto throwScope = DECLARE_THROW_SCOPE(vm);
-    auto globalObject = jsCast<Zig::GlobalObject*>(jsGlobalObject);
-    auto process = jsCast<Process*>(globalObject->processObject());
     auto moduleName = callFrame->argument(0).toWTFString(globalObject);
+    auto process = jsCast<Process*>(lexicalGlobalObject->processObject());
 
     // clang-format off
     if (moduleName == "async_wrap"_s) PROCESS_BINDING_NOT_IMPLEMENTED("async_wrap");
-    if (moduleName == "buffer"_s) PROCESS_BINDING_NOT_IMPLEMENTED_ISSUE("buffer", "2020");
+    if (moduleName == "buffer"_s) PROCESS_BINDING_NOT_IMPLEMENTED("buffer", "2020");
     if (moduleName == "cares_wrap"_s) PROCESS_BINDING_NOT_IMPLEMENTED("cares_wrap");
-    if (moduleName == "config"_s) return JSValue::encode(processBindingConfig(globalObject, vm));
-    if (moduleName == "constants"_s) return JSValue::encode(globalObject->processBindingConstants());
+    if (moduleName == "config"_s) return JSValue::encode(processBindingConfig(lexicalGlobalObject, vm));
+    if (moduleName == "constants"_s) return JSValue::encode(lexicalGlobalObject->processBindingConstants());
     if (moduleName == "contextify"_s) PROCESS_BINDING_NOT_IMPLEMENTED("contextify");
     if (moduleName == "crypto"_s) PROCESS_BINDING_NOT_IMPLEMENTED("crypto");
-    if (moduleName == "fs"_s) PROCESS_BINDING_NOT_IMPLEMENTED_ISSUE("fs", "3546");
+    if (moduleName == "fs"_s) PROCESS_BINDING_NOT_IMPLEMENTED("fs", "3546");
     if (moduleName == "fs_event_wrap"_s) PROCESS_BINDING_NOT_IMPLEMENTED("fs_event_wrap");
     if (moduleName == "http_parser"_s) PROCESS_BINDING_NOT_IMPLEMENTED("http_parser");
     if (moduleName == "icu"_s) PROCESS_BINDING_NOT_IMPLEMENTED("icu");
@@ -1853,13 +1880,13 @@ JSC_DEFINE_HOST_FUNCTION(Process_functionBinding, (JSGlobalObject * jsGlobalObje
     if (moduleName == "process_wrap"_s) PROCESS_BINDING_NOT_IMPLEMENTED("process_wrap");
     if (moduleName == "signal_wrap"_s) PROCESS_BINDING_NOT_IMPLEMENTED("signal_wrap");
     if (moduleName == "spawn_sync"_s) PROCESS_BINDING_NOT_IMPLEMENTED("spawn_sync");
-    if (moduleName == "stream_wrap"_s) PROCESS_BINDING_NOT_IMPLEMENTED_ISSUE("stream_wrap", "4957");
+    if (moduleName == "stream_wrap"_s) PROCESS_BINDING_NOT_IMPLEMENTED("stream_wrap", "4957");
     if (moduleName == "tcp_wrap"_s) PROCESS_BINDING_NOT_IMPLEMENTED("tcp_wrap");
     if (moduleName == "tls_wrap"_s) PROCESS_BINDING_NOT_IMPLEMENTED("tls_wrap");
     if (moduleName == "tty_wrap"_s) return JSValue::encode(Bun::createNodeTTYWrapObject(globalObject));
     if (moduleName == "udp_wrap"_s) PROCESS_BINDING_NOT_IMPLEMENTED("udp_wrap");
     if (moduleName == "url"_s) PROCESS_BINDING_NOT_IMPLEMENTED("url");
-    if (moduleName == "util"_s) return JSValue::encode(processBindingUtil(globalObject, vm));
+    if (moduleName == "util"_s) return JSValue::encode(processBindingUtil(lexicalGlobalObject, vm));
     if (moduleName == "uv"_s) return JSValue::encode(process->bindingUV());
     if (moduleName == "v8"_s) PROCESS_BINDING_NOT_IMPLEMENTED("v8");
     if (moduleName == "zlib"_s) PROCESS_BINDING_NOT_IMPLEMENTED("zlib");
