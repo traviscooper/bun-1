@@ -1,6 +1,6 @@
 type ImportMetaObject = Partial<ImportMeta>;
 
-$visibility = "Private";
+$visibility = "PrivateRecursive";
 export function loadCJS2ESM(this: ImportMetaObject, resolvedSpecifier: string) {
   var loader = Loader;
   var queue = $createFIFO();
@@ -93,7 +93,7 @@ export function loadCJS2ESM(this: ImportMetaObject, resolvedSpecifier: string) {
   return loader.registry.$get(resolvedSpecifier);
 }
 
-$visibility = "Private";
+$visibility = "PrivateRecursive";
 export function requireESM(this: ImportMetaObject, resolved) {
   var entry = Loader.registry.$get(resolved);
 
@@ -109,7 +109,7 @@ export function requireESM(this: ImportMetaObject, resolved) {
   return exports;
 }
 
-$visibility = "Private";
+$visibility = "PrivateRecursive";
 export function internalRequire(this: ImportMetaObject, id) {
   var cached = $requireMap.$get(id);
   const last5 = id.substring(id.length - 5);
@@ -144,7 +144,7 @@ export function internalRequire(this: ImportMetaObject, id) {
   }
 }
 
-$visibility = "Private";
+$visibility = "PrivateRecursive";
 export function createRequireCache() {
   var moduleMap = new Map();
   var inner = {};
@@ -206,6 +206,7 @@ export function createRequireCache() {
 }
 
 $getter;
+$visibility = "Private";
 export function main(this: ImportMetaObject) {
   return this.path === Bun.main && Bun.isMainThread;
 }
